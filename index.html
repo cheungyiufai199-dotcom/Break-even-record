@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>個人專屬記帳系統</title>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft JhengHei",PingFang TC,Noto Sans TC,sans-serif;}
+body{background:#ffffff;color:#111111;min-height:100vh;padding:15px;transition:background 0.3s,color 0.3s;}
+.dark-mode{background:#0a0a0a;color:#f0f0f0;}
+.container{max-width:750px;margin:0 auto;}
+.header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:15px;border-bottom:1px solid #ddd;gap:8px;}
+.dark-mode .header{border-bottom:1px solid #333;}
+.btn{padding:8px 12px;border:none;border-radius:6px;cursor:pointer;font-size:14px;margin:2px;}
+.btn-google{background:#4285f4;color:#fff;}
+.btn-logout{background:#d93025;color:#fff;display:none;}
+.btn-theme{background:#222;color:#fff;}
+.dark-mode .btn-theme{background:#eee;color:#111;}
+.btn-voice{background:#239673;color:#fff;}
+.btn-csv-utf8{background:#337ab7;color:#fff;}
+.btn-csv-big5{background:#7952b3;color:#fff;}
+.card{background:#f8f8f8;border-radius:10px;padding:18px;margin-bottom:15px;border:1px solid #e5e5e5;}
+.dark-mode .card{background:#181818;border:1px solid #272727;}
+.form-item{margin:12px 0;}
+label{display:block;margin-bottom:6px;}
+input,select{width:100%;padding:10px;border-radius:6px;background:#fff;border:1px solid #ccc;color:#111;font-size:15px;}
+.dark-mode input,.dark-mode select{background:#222;border:1px solid #3a3a3a;color:#fff;}
+.operate-bar{margin:15px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+.chart-box{height:320px;margin:20px 0;}
+.list-group-title{font-weight:bold;margin:16px 0 8px;padding-bottom:6px;border-bottom:1px solid #ccc;}
+.dark-mode .list-group-title{border-bottom:1px solid #444;}
+.day-total{padding:6px 10px;margin:6px 0;background:#eef;border-radius:4px;}
+.dark-mode .day-total{background:#223;}
+.list-item{padding:10px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;}
+.dark-mode .list-item{border-bottom:1px solid #2a2a2a;}
+.del-btn{background:#dc3545;color:#fff;padding:4px 8px;border-radius:4px;border:none;font-size:12px;cursor:pointer;}
+.loading{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;z-index:9999;display:none;}
+.tip-popup{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:6px;background:#222;color:#fff;z-index:9998;display:none;}
+</style>
+</head>
+<body>
+<div class="loading" id="loading">系統載入中，請稍候……</div>
+<div class="tip-popup" id="tipBox"></div>
+<div class="container">
+  <div class="header">
+    <h2>個人記帳系統</h2>
+    <div>
+      <button class="btn btn-google" id="loginBtn">Google帳號登入</button>
+      <button class="btn btn-logout" id="logoutBtn">登出帳號</button>
+      <button class="btn btn-theme" id="themeBtn">切換黑白主題</button>
+    </div>
+  </div>
+
+  <div class="card" id="addBillBox" style="display:none;">
+    <h3>新增收支記錄</h3>
+    <div class="operate-bar">
+      <button class="btn btn-voice" id="voiceInputBtn">🎤 語音輸入記帳</button>
+      <button class="btn btn-csv-utf8" id="exportUtf8">匯出CSV(UTF-8)</button>
+      <button class="btn btn-csv-big5" id="exportBig5">匯出CSV(Big5 Excel專用)</button>
+    </div>
+    <div style="font-size:13px;color:#666;margin-bottom:10px;">示範語句：今日餐飲支出50蚊、工資收入8000</div>
+    <div class="form-item">
+      <label>類型</label>
+      <select id="billType">
+        <option value="income">收入</option>
+        <option value="pay">支出</option>
+      </select>
+    </div>
+    <div class="form-item">
+      <label>金額</label>
+      <input type="number" id="billMoney" placeholder="輸入數字金額" min="0" step="0.01">
+    </div>
+    <div class="form-item">
+      <label>分類</label>
+      <select id="billClass">
+        <option value="飲食">飲食</option>
+        <option value="交通">交通</option>
+        <option value="購物">購物</option>
+        <option value="工資">工資</option>
+        <option value="其他">其他</option>
+      </select>
+    </div>
+    <div class="form-item">
+      <label>備註</label>
+      <input type="text" id="billRemark" placeholder="簡單備註說明">
+    </div>
+    <button class="btn" style="background:#28a745;color:#fff;width:100%;margin-top:10px;" id="submitBill">儲存記錄</button>
+  </div>
+
+  <div class="card" id="chartBox" style="display:none;">
+    <h3>本月收支統計總表</h3>
+    <div class="chart-box">
+      <canvas id="myChart"></canvas>
+    </div>
+    <div id="monthTotalText" style="margin-top:10px;font-size:16px;font-weight:bold;"></div>
+  </div>
+
+  <div class="card" id="listBox" style="display:none;">
+    <h3>收支明細清單（按日期分組排序）</h3>
+    <div id="billList"></div>
+  </div>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyCnToMYsM7pIGeGHLt5xFbQfT5RAIWzTQA",
+  authDomain: "van-v9-41439.firebaseapp.com",
+  databaseURL: "https://van-v9-41439-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "van-v9-41439",
+  storageBucket: "van-v9-41439.firebasestorage.app",
+  messagingSenderId: "434512345678"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.database();
+let currentUser = null;
+let chartInstance = null;
+let allBillData = [];
+
+const loading = document.getElementById('loading');
+const tipBox = document.getElementById('tipBox');
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const themeBtn = document.getElementById('themeBtn');
+const voiceInputBtn = document.getElementById('voiceInputBtn');
+const addBillBox = document.getElementById('addBillBox');
+const chartBox = document.getElementById('chartBox');
+const listBox = document.getElementById('listBox');
+const exportUtf8 = document.getElementById('exportUtf8');
+const exportBig5 = document.getElementById('exportBig5');
+const monthTotalText = document.getElementById('monthTotalText');
+
+function showTip(msg, time=2000){
+  tipBox.innerText = msg;
+  tipBox.style.display = 'block';
+  setTimeout(()=>{tipBox.style.display='none'}, time);
+}
+
+function setLoading(show){
+  loading.style.display = show ? 'flex' : 'none';
+}
+
+themeBtn.addEventListener('click',()=>{
+  document.body.classList.toggle('dark-mode');
+  if(currentUser) loadBillData();
+});
+
+let voiceRecognition = null;
+if(window.SpeechRecognition || window.webkitSpeechRecognition){
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  voiceRecognition = new SpeechRecognition();
+  voiceRecognition.lang = 'zh-HK';
+  voiceRecognition.interimResults = false;
+
+  voiceRecognition.onresult = (e)=>{
+    const text = e.results[0][0].transcript;
+    analyseVoiceText(text);
+  };
+
+  voiceRecognition.onerror = ()=>{
+    showTip('語音識別失敗，請開啟瀏覽器咪高峰權限');
+  };
+}
+
+function analyseVoiceText(text){
+  let type = 'pay';
+  let money = 0;
+  let classify = '其他';
+  let remark = text;
+
+  if(text.includes('收入') || text.includes('賺') || text.includes('工資')){
+    type = 'income';
+  }
+  document.getElementById('billType').value = type;
+
+  const numArr = text.match(/\d+/);
+  if(numArr) money = parseInt(numArr[0]);
+  document.getElementById('billMoney').value = money;
+
+  if(text.includes('餐') || text.includes('飯') || text.includes('飲食')) classify = '飲食';
+  else if(text.includes('車') || text.includes('交通') || text.includes('地鐵')) classify = '交通';
+  else if(text.includes('買') || text.includes('購物')) classify = '購物';
+  else if(text.includes('工資') || text.includes('薪金')) classify = '工資';
+  document.getElementById('billClass').value = classify;
+
+  document.getElementById('billRemark').value = text;
+  showTip('語音解析完成，請確認內容再儲存');
+}
+
+voiceInputBtn.addEventListener('click',()=>{
+  if(!voiceRecognition) return showTip('當前瀏覽器唔支援語音輸入功能');
+  if(!currentUser) return showTip('請先完成Google帳號登入');
+  voiceRecognition.start();
+  showTip('請口述記帳內容');
+});
+
+loginBtn.addEventListener('click',async ()=>{
+  setLoading(true);
+  try{
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await auth.signInWithPopup(provider);
+  }catch(err){
+    setLoading(false);
+    if(err.code === 'auth/popup-blocked'){
+      showTip('登入彈窗被瀏覽器阻擋，請關閉廣告攔截插件再試');
+    }else if(err.code === 'auth/unauthorized-domain'){
+      showTip('Firebase後台未加入網域白名單，需要手動新增Pages網址');
+    }else{
+      showTip('登入失敗：'+err.message);
+    }
+    console.error('登入錯誤',err);
+  }
+});
+
+logoutBtn.addEventListener('click',async ()=>{
+  setLoading(true);
+  try{
+    await auth.signOut();
+    showTip('帳號已成功登出');
+  }catch(err){
+    setLoading(false);
+    showTip('登出異常：'+err.message);
+  }
+});
+
+auth.onAuthStateChanged(user=>{
+  setLoading(false);
+  currentUser = user;
+  if(user){
+    loginBtn.style.display = 'none';
+    logoutBtn.style.display = 'inline-block';
+    addBillBox.style.display = 'block';
+    chartBox.style.display = 'block';
+    listBox.style.display = 'block';
+    loadBillData();
+  }else{
+    loginBtn.style.display = 'inline-block';
+    logoutBtn.style.display = 'none';
+    addBillBox.style.display = 'none';
+    chartBox.style.display = 'none';
+    listBox.style.display = 'none';
+    currentUser = null;
+    allBillData = [];
+    if(chartInstance) chartInstance.destroy();
+  }
+});
+
+document.getElementById('submitBill').addEventListener('click',async ()=>{
+  if(!currentUser) return showTip('請先登入Google帳號');
+  const type = document.getElementById('billType').value;
+  const money = parseFloat(document.getElementById('billMoney').value);
+  const cls = document.getElementById('billClass').value;
+  const remark = document.getElementById('billRemark').value.trim();
+
+  if(isNaN(money) || money <=0) return showTip('請填寫有效金額數字');
+  setLoading(true);
+
+  try{
+    const now = new Date();
+    const uid = currentUser.uid;
+    const newBill = {
+      uid:uid,
+      type:type,
+      money:Number(money.toFixed(2)),
+      classify:cls,
+      remark:remark,
+      time:now.getTime(),
+      dateStr:now.toLocaleDateString('zh-HK'),
+      day:now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,'0')+"-"+String(now.getDate()).padStart(2,'0'),
+      timeStr:String(now.getHours()).padStart(2,'0')+":"+String(now.getMinutes()).padStart(2,'0')+":"+String(now.getSeconds()).padStart(2,'0')
+    };
+    await db.ref('bills/'+uid).push(newBill);
+    document.getElementById('billMoney').value = '';
+    document.getElementById('billRemark').value = '';
+    showTip('收支記錄儲存完畢');
+    loadBillData();
+  }catch(err){
+    showTip('儲存失敗，檢查Firebase資料庫權限：'+err.message);
+    console.error(err);
+  }finally{
+    setLoading(false);
+  }
+});
+
+async function deleteBill(billId){
+  if(!currentUser) return;
+  setLoading(true);
+  try{
+    await db.ref('bills/'+currentUser.uid+"/"+billId).remove();
+    showTip('記錄已刪除');
+    loadBillData();
+  }catch(e){
+    showTip('刪除失敗：'+e.message);
+  }finally{
+    setLoading(false);
+  }
+}
+
+async function loadBillData(){
+  if(!currentUser) return;
+  setLoading(true);
+  try{
+    const snapshot = await db.ref('bills/'+currentUser.uid).orderByChild('time').once('value');
+    allBillData = [];
+    snapshot.forEach(item=>{
+      allBillData.push({id:item.key,...item.val()});
+    });
+    allBillData.sort((a,b)=>a.time-b.time);
+    renderList(allBillData);
+    renderChart(allBillData);
+  }catch(err){
+    showTip('讀取帳單數據失敗，網絡或權限異常');
+    console.error(err);
+  }finally{
+    setLoading(false);
+  }
+}
+
+function renderList(bills){
+  const wrap = document.getElementById('billList');
+  if(bills.length ===0){
+    wrap.innerHTML = '<div style="padding:10px;text-align:center;">暫無任何收支記錄</div>';
+    monthTotalText.innerText = '';
+    return;
+  }
+  const groupMap = {};
+  let totalIncome = 0, totalPay = 0;
+  bills.forEach(item=>{
+    if(!groupMap[item.day]) groupMap[item.day] = [];
+    groupMap[item.day].push(item);
+    if(item.type==='income') totalIncome += item.money;
+    else totalPay += item.money;
+  });
+  monthTotalText.innerText = `本月總收入：$${totalIncome.toFixed(2)}　總支出：$${totalPay.toFixed(2)}　本月結餘：$${(totalIncome-totalPay).toFixed(2)}`;
+
+  let html = '';
+  const dayKeys = Object.keys(groupMap).sort();
+  dayKeys.forEach(day=>{
+    const dayList = groupMap[day];
+    let dayIn = 0, dayOut = 0;
+    html += `<div class="list-group-title">📅 ${day}</div>`;
+    dayList.forEach(item=>{
+      if(item.type==='income') dayIn += item.money;
+      else dayOut += item.money;
+      const sign = item.type === 'income' ? '+' : '-';
+      const color = item.type === 'income' ? '#099441' : '#e02424';
+      html += `
+      <div class="list-item">
+        <div>
+          <div>${item.timeStr}｜${item.classify}｜${item.remark||'無備註'}</div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <span style="color:${color};font-weight:bold;">${sign}$${item.money.toFixed(2)}</span>
+          <button class="del-btn" onclick="deleteBill('${item.id}')">刪除</button>
+        </div>
+      </div>`;
+    });
+    html += `<div class="day-total">當日小計：收入$${dayIn.toFixed(2)}｜支出$${dayOut.toFixed(2)}｜當日結餘$${(dayIn-dayOut).toFixed(2)}</div>`;
+  });
+  wrap.innerHTML = html;
+}
+
+function renderChart(bills){
+  if(chartInstance) chartInstance.destroy();
+  let totalIncome = 0, totalPay =0;
+  bills.forEach(item=>{
+    if(item.type === 'income') totalIncome += item.money;
+    else totalPay += item.money;
+  });
+
+  const ctx = document.getElementById('myChart').getContext('2d');
+  const isDark = document.body.classList.contains('dark-mode');
+  const textColor = isDark ? '#eee' : '#111';
+
+  chartInstance = new Chart(ctx,{
+    type:'doughnut',
+    data:{
+      labels:['總收入','總支出'],
+      datasets:[{
+        data:[totalIncome,totalPay],
+        backgroundColor:['#36d399','#f87272']
+      }]
+    },
+    options:{
+      plugins:{
+        legend:{labels:{color:textColor}}
+      }
+    }
+  });
+}
+
+function buildCSVContent(encodeType){
+  let header = '"日期","時間","收支類型","分類","金額","備註"\n';
+  let body = '';
+  allBillData.forEach(item=>{
+    const typeTxt = item.type==='income' ? '收入' : '支出';
+    const row = `"${item.day}","${item.timeStr}","${typeTxt}","${item.classify}","${item.money.toFixed(2)}","${(item.remark||'').replace(/"/g,'""')}"\n`;
+    body += row;
+  });
+  let totalIn = allBillData.filter(i=>i.type==='income').reduce((s,v)=>s+v.money,0);
+  let totalOut = allBillData.filter(i=>i.type==='pay').reduce((s,v)=>s+v.money,0);
+  body += `\n"統計總計","","總收入","","${totalIn.toFixed(2)}",""\n`;
+  body += `"","","總支出","","${totalOut.toFixed(2)}",""\n`;
+  body += `"","","結餘","","${(totalIn-totalOut).toFixed(2)}",""`;
+  let csv = header+body;
+  if(encodeType==='utf8'){
+    const blob = new Blob([new Uint8Array([0xEF,0xBB,0xBF]),csv],{type:'text/csv;charset=utf-8'});
+    return blob;
+  }else{
+    const iconv = TextEncoder;
+    const uint8 = new iconv('big5').encode(csv);
+    const blob = new Blob([uint8],{type:'text/csv;charset=Big5'});
+    return blob;
+  }
+}
+
+function downloadBlob(blob,fileName){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+exportUtf8.addEventListener('click',()=>{
+  if(allBillData.length===0) return showTip('暫無數據可以匯出');
+  const blob = buildCSVContent('utf8');
+  downloadBlob(blob,"帳單紀錄_UTF8.csv");
+  showTip('UTF-8格式CSV已開始下載');
+});
+
+exportBig5.addEventListener('click',()=>{
+  if(allBillData.length===0) return showTip('暫無數據可以匯出');
+  const blob = buildCSVContent('big5');
+  downloadBlob(blob,"帳單紀錄_Big5_Excel專用.csv");
+  showTip('Big5編碼CSV已開始下載，Windows Excel直接打開唔亂碼');
+});
+
+window.deleteBill = deleteBill;
+</script>
+</body>
+</html>
+
