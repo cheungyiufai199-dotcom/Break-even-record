@@ -1,272 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>損益打平與收支記錄器</title>
+
+<!-- Firebase v10 Compat CDN (適合單一 HTML 檔案直接運行) -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
+<!-- 數據圖表庫 -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+body { background: #f5f7fa; color: #333; min-height: 100vh; padding: 16px; }
+.container { max-width: 680px; margin: 0 auto; }
+.card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.header { display: flex; justify-content: space-between; align-items: center; }
+.btn { padding: 10px 16px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+.btn-primary { background: #1a73e8; color: #fff; }
+.btn-danger { background: #ea4335; color: #fff; }
+.btn-success { background: #34a853; color: #fff; width: 100%; margin-top: 12px; }
+.form-group { margin-bottom: 12px; }
+label { display: block; font-size: 14px; margin-bottom: 4px; color: #666; }
+input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="card header">
+    <h2>收支計算記錄器</h2>
+    <div>
+      <button id="loginBtn" class="btn btn-primary">Google 登入</button>
+      <button id="logoutBtn" class="btn btn-danger hidden">登出</button>
+    </div>
+  </div>
+
+  <div id="appBody" class="hidden">
+    <!-- 新增紀錄表單 -->
+    <div class="card">
+      <h3>新增交易紀錄</h3>
+      <div class="form-group" style="margin-top: 12px;">
+        <label>類型</label>
+        <select id="type">
+          <option value="expense">支出 (-)</option>
+          <option value="income">收入 (+)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>金額 (HKD)</label>
+        <input type="number" id="amount" placeholder="0.00" step="0.1">
+      </div>
+      <div class="form-group">
+        <label>類別</label>
+        <select id="category">
+          <option value="餐飲">餐飲</option>
+          <option value="交通">交通</option>
+          <option value="購物">購物</option>
+          <option value="固定成本">固定成本 (Break-even)</option>
+          <option value="薪水">薪水</option>
+          <option value="其他">其他</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>備註</label>
+        <input type="text" id="note" placeholder="例如：午餐麥當勞">
+      </div>
+      <button id="saveBtn" class="btn btn-success">儲存紀錄</button>
+    </div>
+
+    <!-- 歷史紀錄 -->
+    <div class="card">
+      <h3>交易歷史明細</h3>
+      <div id="recordList" style="margin-top: 12px;">載入中...</div>
+    </div>
+  </div>
+</div>
+
 <script>
+// 使用你的 Firebase 配置項目
 const firebaseConfig = {
-  apiKey: "AIzaSyCnToMYsM7pIGeGHLt5xFbQfT5RAIWzTQA",
-  authDomain: "van-v9-41439.firebaseapp.com",
-  databaseURL: "https://van-v9-41439-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "van-v9-41439",
-  storageBucket: "van-v9-41439.appspot.com",
-  messagingSenderId: "434512345678"
+  apiKey: "AIzaSyBFfgFYyh1AGvpBYHdRUtHsnBz6pawPZOI",
+  authDomain: "break-even-record-calculation.firebaseapp.com",
+  databaseURL: "https://break-even-record-calculation-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "break-even-record-calculation",
+  storageBucket: "break-even-record-calculation.firebasestorage.app",
+  messagingSenderId: "963032266930",
+  appId: "1:963032266930:web:23f60bb6409e55f1e371ab",
+  measurementId: "G-0RH7CCVNB6"
 };
+
+// 初始化
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.database();
 
 let currentUser = null;
-let chartInstance = null;
-let allBillData = [];
 
-const loadingEl = document.getElementById("loading");
-const tipBoxEl = document.getElementById("tipBox");
+// DOM 元素
 const loginBtn = document.getElementById("loginBtn");
 const logoutBtn = document.getElementById("logoutBtn");
-const themeBtn = document.getElementById("themeBtn");
-const addBillBox = document.getElementById("addBillBox");
-const chartBox = document.getElementById("chartBox");
-const listBox = document.getElementById("listBox");
-const voiceBtn = document.getElementById("voiceBtn");
-const exportUtf8 = document.getElementById("exportUtf8");
-const exportBig5 = document.getElementById("exportBig5");
-const submitBtn = document.getElementById("submitBtn");
-const billType = document.getElementById("billType");
-const billMoney = document.getElementById("billMoney");
-const billClass = document.getElementById("billClass");
-const billRemark = document.getElementById("billRemark");
-const billListEl = document.getElementById("billList");
-const monthTotalText = document.getElementById("monthTotalText");
-const myChartCanvas = document.getElementById("myChart");
+const appBody = document.getElementById("appBody");
+const saveBtn = document.getElementById("saveBtn");
+const recordList = document.getElementById("recordList");
 
-function showTip(msg, dur=2200){
-  tipBoxEl.innerText = msg;
-  tipBoxEl.style.display = "block";
-  setTimeout(()=>{tipBoxEl.style.display="none";}, dur);
-}
-function setLoading(show){
-  loadingEl.style.display = show ? "flex" : "none";
-}
-
-themeBtn.addEventListener("click",()=>{
-  document.body.classList.toggle("dark-mode");
-  if(currentUser) renderChart(allBillData);
-});
-
-// 登入
-loginBtn.addEventListener("click",async ()=>{
-  setLoading(true);
+// Google 登入
+loginBtn.addEventListener("click", () => {
   const provider = new firebase.auth.GoogleAuthProvider();
-  try{
-    const result = await auth.signInWithPopup(provider);
-    currentUser = result.user;
-    showTip("登入成功");
-  }catch(err){
-    console.error("登入錯誤",err);
-    if(err.code === "auth/popup-blocked-by-browser"){
-      showTip("瀏覽器攔截咗彈窗，請允許本站彈窗");
-    }else if(err.code === "auth/popup-closed-by-user"){
-      showTip("你關閉咗登入彈窗");
-    }else{
-      showTip("登入失敗："+err.message,3500);
-    }
-  }finally{
-    setLoading(false);
-  }
+  auth.signInWithPopup(provider).catch(err => alert("登入失敗：" + err.message));
 });
 
-logoutBtn.addEventListener("click",async ()=>{
-  setLoading(true);
-  try{
-    await auth.signOut();
-    showTip("已登出");
-  }catch(e){
-    showTip("登出異常："+e.message);
-  }finally{
-    setLoading(false);
-  }
-});
+// 登出
+logoutBtn.addEventListener("click", () => auth.signOut());
 
-auth.onAuthStateChanged(user=>{
-  setLoading(true);
+// 監聽登入狀態
+auth.onAuthStateChanged(user => {
   currentUser = user;
-  if(user){
-    loginBtn.style.display = "none";
-    logoutBtn.style.display = "inline-block";
-    addBillBox.classList.remove("hidden");
-    chartBox.classList.remove("hidden");
-    listBox.classList.remove("hidden");
-    loadBillData();
-  }else{
-    loginBtn.style.display = "inline-block";
-    logoutBtn.style.display = "none";
-    addBillBox.classList.add("hidden");
-    chartBox.classList.add("hidden");
-    listBox.classList.add("hidden");
-    allBillData = [];
-    if(chartInstance){chartInstance.destroy();chartInstance=null;}
+  if (user) {
+    loginBtn.classList.add("hidden");
+    logoutBtn.classList.remove("hidden");
+    appBody.classList.remove("hidden");
+    loadData();
+  } else {
+    loginBtn.classList.remove("hidden");
+    logoutBtn.classList.add("hidden");
+    appBody.classList.add("hidden");
   }
-  setLoading(false);
 });
 
-// 語音輸入
-voiceBtn.addEventListener("click",()=>{
-  if(!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)){
-    showTip("你嘅瀏覽器唔支援語音辨識");
+// 儲存資料到 Realtime Database
+saveBtn.addEventListener("click", () => {
+  const amount = parseFloat(document.getElementById("amount").value);
+  const type = document.getElementById("type").value;
+  const category = document.getElementById("category").value;
+  const note = document.getElementById("note").value.trim();
+
+  if (isNaN(amount) || amount <= 0) {
+    alert("請輸入有效的金額！");
     return;
   }
-  showTip("請講說話……");
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const recog = new SpeechRecognition();
-  recog.lang = "zh-HK";
-  recog.interimResults = false;
-  recog.onresult = e=>{
-    const text = e.results[0][0].transcript;
-    billRemark.value = text;
-    showTip("已錄入備註："+text);
+
+  const newRecord = {
+    amount,
+    type,
+    category,
+    note,
+    timestamp: firebase.database.ServerValue.TIMESTAMP,
+    dateStr: new Date().toLocaleDateString()
   };
-  recog.onerror = ()=>showTip("語音辨識失敗");
-  recog.start();
+
+  db.ref("users/" + currentUser.uid + "/records").push(newRecord)
+    .then(() => {
+      document.getElementById("amount").value = "";
+      document.getElementById("note").value = "";
+    })
+    .catch(err => alert("儲存失敗：" + err.message));
 });
 
-// 儲存記錄
-submitBtn.addEventListener("click",async ()=>{
-  if(!currentUser){showTip("請先登入");return;}
-  const money = parseFloat(billMoney.value.trim());
-  if(isNaN(money) || money<=0){showTip("請輸入正確金額");return;}
-  setLoading(true);
-  try{
-    const now = new Date();
-    const newRecord = {
-      uid: currentUser.uid,
-      type: billType.value,
-      money: Number(money.toFixed(2)),
-      classify: billClass.value,
-      remark: billRemark.value.trim(),
-      timestamp: now.getTime(),
-      day: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`,
-      timeStr: `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}`
-    };
-    await db.ref("bills/"+currentUser.uid).push(newRecord);
-    billMoney.value = ""; billRemark.value = "";
-    showTip("記錄儲存成功");
-    await loadBillData();
-  }catch(err){
-    showTip("寫入失敗："+err.message);
-  }finally{
-    setLoading(false);
-  }
-});
-
-async function deleteRecord(key){
-  if(!currentUser) return;
-  setLoading(true);
-  try{
-    await db.ref("bills/"+currentUser.uid+"/"+key).remove();
-    showTip("已刪除");
-    await loadBillData();
-  }catch(e){
-    showTip("刪除失敗："+e.message);
-  }finally{
-    setLoading(false);
-  }
-}
-
-async function loadBillData(){
-  if(!currentUser) return;
-  const snap = await db.ref("bills/"+currentUser.uid).orderByChild("timestamp").once("value");
-  allBillData = [];
-  snap.forEach(child=>{
-    allBillData.push({id:child.key,...child.val()});
-  });
-  renderList(allBillData);
-  renderChart(allBillData);
-}
-
-function renderList(list){
-  billListEl.innerHTML = "";
-  if(list.length===0){
-    billListEl.innerHTML = "<div style='padding:12px;text-align:center;'>暫無記錄</div>";
-    monthTotalText.innerText = "";
-    return;
-  }
-  const group = {};
-  let totalIncome = 0, totalPay = 0;
-  list.forEach(it=>{
-    if(!group[it.day]) group[it.day]=[];
-    group[it.day].push(it);
-    if(it.type==="income") totalIncome += it.money;
-    else totalPay += it.money;
-  });
-  monthTotalText.innerText = `總收入：$${totalIncome.toFixed(2)} 總支出：$${totalPay.toFixed(2)} 結餘：$${(totalIncome - totalPay).toFixed(2)}`;
-  Object.keys(group).sort().reverse().forEach(day=>{
-    const dayList = group[day];
-    let dayIn=0, dayOut=0;
-    const dayTitle = document.createElement("div");
-    dayTitle.className = "list-group-title";
-    dayTitle.innerText = "📅 "+day;
-    billListEl.appendChild(dayTitle);
-    dayList.forEach(row=>{
-      if(row.type==="income") dayIn+=row.money; else dayOut+=row.money;
-      const itemDiv = document.createElement("div");
-      itemDiv.className = "list-item";
-      const sign = row.type==="income"?"+":"-";
-      const color = row.type==="income"?"#097038":"#c82423";
-      itemDiv.innerHTML = `<div>${row.timeStr}｜${row.classify}｜${row.remark||"無備註"}</div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span style="font-weight:bold;color:${color}">${sign}$${row.money.toFixed(2)}</span>
-        <button class="del-btn" onclick="deleteRecord('${row.id}')">刪除</button>
-      </div>`;
-      billListEl.appendChild(itemDiv);
-    });
-    const daySum = document.createElement("div");
-    daySum.className = "day-total";
-    daySum.innerText = `當日小計：收入$${dayIn.toFixed(2)}｜支出$${dayOut.toFixed(2)}｜淨$${(dayIn-dayOut).toFixed(2)}`;
-    billListEl.appendChild(daySum);
-  });
-}
-
-function renderChart(list){
-  if(chartInstance) chartInstance.destroy();
-  let inSum=0, outSum=0;
-  list.forEach(it=>{
-    if(it.type==="income") inSum+=it.money; else outSum+=it.money;
-  });
-  const ctx = myChartCanvas.getContext("2d");
-  const isDark = document.body.classList.contains("dark-mode");
-  chartInstance = new Chart(ctx,{
-    type:"doughnut",
-    data:{
-      labels:["總收入","總支出"],
-      datasets:[{data:[inSum,outSum],backgroundColor:["#36d399","#f87272"]}]
-    },
-    options:{
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins:{legend:{labels:{color:isDark?"#eee":"#111"}}}
+// 讀取資料
+function loadData() {
+  db.ref("users/" + currentUser.uid + "/records").on("value", snapshot => {
+    recordList.innerHTML = "";
+    const data = snapshot.val();
+    if (!data) {
+      recordList.innerHTML = "<p style='color:#888;'>暫無紀錄</p>";
+      return;
     }
+
+    Object.keys(data).reverse().forEach(key => {
+      const item = data[key];
+      const div = document.createElement("div");
+      div.style.cssText = "display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;";
+      div.innerHTML = `
+        <div>
+          <strong>${item.category}</strong> <small>(${item.note || '無備註'})</small><br>
+          <small style="color:#aaa">${item.dateStr}</small>
+        </div>
+        <div style="font-weight:bold; color: ${item.type === 'income' ? '#34a853' : '#ea4335'}">
+          ${item.type === 'income' ? '+' : '-'} $${item.amount.toFixed(2)}
+        </div>
+      `;
+      recordList.appendChild(div);
+    });
   });
 }
-
-function buildCSV(type){
-  const header = `"日期","時間","收支類別","分類","金額","備註"\n`;
-  let body = "";
-  allBillData.forEach(r=>{
-    const tp = r.type==="income"?"收入":"支出";
-    body += `"${r.day}","${r.timeStr}","${tp}","${r.classify}","${r.money.toFixed(2)}","${(r.remark||"").replace(/"/g,'""')}"\n`;
-  });
-  const csv = header + body;
-  const blob = new Blob([new Uint8Array([0xef,0xbb,0xbf]),csv],{type:"text/csv;charset=utf-8"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = type==="utf8"?"帳單_utf8.csv":"帳單_excel.csv";
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-exportUtf8.addEventListener("click",()=>{
-  if(allBillData.length===0){showTip("暫無數據");return;}
-  buildCSV("utf8"); showTip("CSV已下載");
-});
-exportBig5.addEventListener("click",()=>{
-  if(allBillData.length===0){showTip("暫無數據");return;}
-  buildCSV("big5"); showTip("CSV已下載");
-});
-
-window.deleteRecord = deleteRecord;
 </script>
+</body>
+</html>
